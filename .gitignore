@@ -1,0 +1,6 @@
+/dist/
+*.tar.zst
+*.tar.xz
+*.deb
+*.exe
+*.log
