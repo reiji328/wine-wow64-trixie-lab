@@ -1,0 +1,48 @@
+name: Wine 11.0 new WoW64 - Debian 13
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wine11-wow64-manual
+  cancel-in-progress: false
+
+jobs:
+  compile-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    container:
+      image: debian:trixie
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      WINE_VERSION: '11.0'
+      WINE_SOURCE_SHA256: 'c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701'
+      WINE_INSTALL_PREFIX: '/workspace/shared/line-wow64-11.0'
+    steps:
+      - name: Bootstrap git and CA certificates
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates bash
+      - name: Check out CI definition
+        uses: actions/checkout@v4
+      - name: Prepare Debian 13 build dependencies
+        run: bash scripts/10-prerequisites.sh
+      - name: Fetch SHA-256 pinned Wine 11.0 source
+        run: bash scripts/20-download-source.sh
+      - name: Compile Wine in new WoW64 mode
+        run: bash scripts/30-build.sh
+      - name: Gate on real 32-bit Windows command
+        run: bash scripts/40-test.sh
+      - name: Package successful build only
+        run: bash scripts/50-package.sh
+      - name: Publish verification log and successful binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: wine11-wow64-trixie-${{ github.run_id }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
