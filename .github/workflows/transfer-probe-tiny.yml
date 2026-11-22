@@ -1,0 +1,30 @@
+name: Probe tiny Actions artifact transfer (4 KiB)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-tiny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Create harmless 4 KiB probe
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p tiny-probe
+          dd if=/dev/urandom of=tiny-probe/payload-4KiB.bin bs=1024 count=4 status=none
+          (cd tiny-probe && sha256sum payload-4KiB.bin > SHA256SUMS)
+          stat -c 'PAYLOAD_BYTES=%s' tiny-probe/payload-4KiB.bin
+          cat tiny-probe/SHA256SUMS
+      - name: Upload tiny Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transfer-probe-4KiB-${{ github.run_id }}
+          path: tiny-probe/
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
