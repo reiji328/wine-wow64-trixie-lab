@@ -1,0 +1,41 @@
+name: Publish README-only Release probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release-readme-probe-20261122
+  cancel-in-progress: false
+jobs:
+  publish-probe:
+    if: github.ref == 'refs/heads/master' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate public README only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f README.md && test ! -L README.md
+          test "$(wc -c < README.md)" -eq 2731
+          printf '%s  README.md\n' a7c187b0bca39f1e198f4348138ad0b2393ac682b431cc81856f48fe0e257b05 | sha256sum -c -
+          test ! -e LineInst.exe
+          test ! -e wine11-wow64-debian13.tar.zst
+      - name: Create one README-only test release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          tag=transfer-probe-20261122
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
+          tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')
+          if grep -Fxq "$tag" <<< "$releases" || grep -Fxq "$tag" <<< "$tags"; then
+            echo 'Release or tag already exists; do not duplicate'
+            exit 1
+          fi
+          gh release create "$tag" README.md --target "$GITHUB_SHA" --title 'Transfer probe - README only' --notes 'Non-sensitive public README download test only. No Wine binaries, no credentials. This is not a software release.' --latest=false
+          gh release view "$tag" --json url,assets
