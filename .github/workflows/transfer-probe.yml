@@ -1,0 +1,30 @@
+name: Probe small artifact transfer (20 MiB)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Generate non-sensitive transfer test file
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p transfer-probe
+          dd if=/dev/urandom of=transfer-probe/payload-20MiB.bin bs=1048576 count=20 status=none
+          (cd transfer-probe && sha256sum payload-20MiB.bin > SHA256SUMS)
+          stat -c 'PAYLOAD_BYTES=%s' transfer-probe/payload-20MiB.bin
+          cat transfer-probe/SHA256SUMS
+      - name: Upload short-lived test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transfer-probe-20MiB-${{ github.run_id }}
+          path: transfer-probe/
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
