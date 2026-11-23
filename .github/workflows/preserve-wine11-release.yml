@@ -1,0 +1,95 @@
+name: Preserve verified Wine11 and source
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: wine11-preserve-44963211048
+  cancel-in-progress: false
+jobs:
+  preserve:
+    if: github.ref == 'refs/heads/master' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_REPO: reiji328/wine-wow64-trixie-lab
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download and verify original artifact ZIP before extraction
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag=wine11-wow64-preserve-20261123
+          check_absent() {
+            local url="$1" status
+            if ! status="$(curl -sS --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$url")"; then
+              echo 'GitHub duplicate check failed: transport error' >&2
+              return 1
+            fi
+            case "$status" in
+              404) return 0 ;;
+              200) echo 'GitHub duplicate check failed: release or tag already exists' >&2; return 1 ;;
+              *) echo "GitHub duplicate check failed: HTTP $status" >&2; return 1 ;;
+            esac
+          }
+          check_absent "https://api.github.com/repos/$GH_REPO/releases/tags/$tag"
+          check_absent "https://api.github.com/repos/$GH_REPO/git/ref/tags/$tag"
+          metadata="$(gh api "repos/$GH_REPO/actions/artifacts/14731833093")"
+          test "$(jq -r '.id' <<<"$metadata")" = 14731833093
+          test "$(jq -r '.workflow_run.id' <<<"$metadata")" = 44963211048
+          test "$(jq -r '.expired' <<<"$metadata")" = false
+          test "$(jq -r '.name' <<<"$metadata")" = wine11-wow64-trixie-44963211048
+          test "$(jq -r '.size_in_bytes' <<<"$metadata")" = 409015731
+          test "$(jq -r '.digest' <<<"$metadata")" = sha256:9f85800dcc59a3ae2953a1ab11c400cf155c8233014a630d4607980b4d25c2f5
+          mkdir -p work/original
+          curl -fLSs --proto '=https' --proto-redir '=https' --max-time 1200 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GH_REPO/actions/artifacts/14731833093/zip" -o work/artifact.zip
+          test "$(stat -c %s work/artifact.zip)" = 409015731
+          echo '9f85800dcc59a3ae2953a1ab11c400cf155c8233014a630d4607980b4d25c2f5  work/artifact.zip' | sha256sum -c -
+          unzip -q work/artifact.zip -d work/original
+          test -f work/original/wine11-wow64-debian13.tar.zst
+          test -f work/original/SHA256SUMS
+          test -f work/original/BUILD-MANIFEST.txt
+          test "$(wc -l < work/original/SHA256SUMS)" = 1
+          grep -Eq '^[0-9a-f]{64}  dist/wine11-wow64-debian13[.]tar[.]zst$' work/original/SHA256SUMS
+          expected="$(awk '{print $1}' work/original/SHA256SUMS)"
+          printf '%s  work/original/wine11-wow64-debian13.tar.zst\n' "$expected" | sha256sum -c -
+          grep -Fq 'Wine version: 11.0' work/original/BUILD-MANIFEST.txt
+          grep -Fq 'Install prefix: /workspace/shared/line-wow64-11.0' work/original/BUILD-MANIFEST.txt
+          size="$(stat -c %s work/original/wine11-wow64-debian13.tar.zst)"
+          test "$size" -gt 100000000
+          test "$size" -lt 2147483648
+          echo "Wine binary validated, bytes=$size sha256=$expected"
+      - name: Fetch source, verify pinned hash, package license and build method
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fLSs --proto '=https' --proto-redir '=https' --max-time 900 \
+            'https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz' -o work/wine-11.0.tar.xz
+          echo 'c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701  work/wine-11.0.tar.xz' | sha256sum -c -
+          tar -xOf work/wine-11.0.tar.xz wine-11.0/COPYING.LIB > work/COPYING.LIB
+          tar -xOf work/wine-11.0.tar.xz wine-11.0/LICENSE > work/WINE-LICENSE
+          tar -czf work/build-procedures.tar.gz .github/workflows/build-wine.yml scripts AGENTS.md README.md
+          test -s work/COPYING.LIB
+          test -s work/WINE-LICENSE
+          test -s work/build-procedures.tar.gz
+      - name: Create public Release with corresponding source and license
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh release create wine11-wow64-preserve-20261123 \
+            work/original/wine11-wow64-debian13.tar.zst work/original/SHA256SUMS \
+            work/wine-11.0.tar.xz work/COPYING.LIB work/WINE-LICENSE work/build-procedures.tar.gz \
+            --target "$GITHUB_SHA" --latest=false \
+            --title 'Wine 11 new WoW64 Debian 13 - verified test build' \
+            --notes 'Unofficial build from CI run 44963211048; not an official Wine/LINE release. Wine source is pinned SHA256 c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701. SHA256SUMS references original dist/ path. Source, LGPL license and build instructions are provided.'
+          gh release view wine11-wow64-preserve-20261123 --json url,assets
