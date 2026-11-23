@@ -1,0 +1,40 @@
+name: Probe 20 MiB Release asset transfer
+on:
+  workflow_dispatch
+permissions:
+  contents: write
+concurrency:
+  group: transfer-release-20mib-20261122
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/master' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Generate non-sensitive 20 MiB transfer probe
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          dd if=/dev/urandom of=release-probe-20MiB.bin bs=1048576 count=20 status=none
+          test "$(stat -c %s release-probe-20MiB.bin)" -eq 20971520
+          sha256sum release-probe-20MiB.bin > RELEASE_PROBE_SHA256SUMS.txt
+          cat RELEASE_PROBE_SHA256SUMS.txt
+      - name: Publish only harmless test files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: reiji328/wine-wow64-trixie-lab
+        run: |
+          set -Eeuo pipefail
+          tag=transfer-probe-20MiB-20261122
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release already exists; refuse duplicate"
+            exit 1
+          fi
+          gh release create "$tag" release-probe-20MiB.bin RELEASE_PROBE_SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Transfer probe - 20 MiB random data only" \
+            --notes "Non-sensitive random-data transfer test. No Wine binaries, no LINE data, no credentials." \
+            --latest=false
+          gh release view "$tag" --json url,assets
